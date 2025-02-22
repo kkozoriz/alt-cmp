@@ -1,0 +1,9 @@
+corosync corosync
+pve-manager pve-manager
+pve-container pve-container
+pve-docs pve-docs
+pve-ha-manager pve-ha-manager
+pve-xtermjs pve-xtermjs
+pve-qemu-server qemu-server
+swtpm swtpm
+proxmox-backup-file-restore proxmox-backup-file-restore
