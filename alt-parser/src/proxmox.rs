@@ -18,7 +18,7 @@ impl PackageParser for ProxmoxParser {
             } else if let Some(captures) = version_re.captures(line) {
                 if !current_package.is_empty() {
                     let version = captures[1].to_string();
-                    let clean_version = version.split('-').next().unwrap_or(&version).to_string();
+                    let clean_version = clean_version_string(&version);
 
                     packages.insert(current_package.clone(), clean_version);
                 }
@@ -26,5 +26,16 @@ impl PackageParser for ProxmoxParser {
         }
 
         Ok(packages)
+    }
+}
+
+fn clean_version_string(version: &str) -> String {
+    let base_version = version.split('-').next().unwrap_or(version);
+    let parts: Vec<&str> = base_version.split('+').collect();
+
+    if parts.len() > 1 {
+        parts[0].to_string()
+    } else {
+        base_version.to_string()
     }
 }

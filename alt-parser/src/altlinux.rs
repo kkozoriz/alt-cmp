@@ -13,7 +13,13 @@ impl PackageParser for AltLinuxParser {
 
             if parts.len() >= 2 {
                 let name = parts[0].to_string();
-                let version = parts[1].split('-')
+                let raw_version = parts[1];
+
+                let version = raw_version
+                    .split(':')
+                    .last()
+                    .unwrap_or(raw_version)
+                    .split('-')
                     .filter(|part| !part.starts_with("alt"))
                     .collect::<Vec<&str>>()
                     .join("-");
