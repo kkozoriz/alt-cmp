@@ -1,7 +1,7 @@
 use crate::PackageParser;
+use regex::Regex;
 use std::collections::HashMap;
 use std::error::Error;
-use regex::Regex;
 
 pub struct ProxmoxParser;
 

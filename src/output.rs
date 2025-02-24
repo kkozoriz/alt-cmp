@@ -1,11 +1,11 @@
 use crate::cli::Args;
-use prettytable::{Table, Row, Cell};
+use colored::Colorize;
+use prettytable::{Cell, Row, Table};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
-use colored::Colorize;
 use version_compare::Version;
 
 // TODO!: need refactor
@@ -48,8 +48,14 @@ fn get_package_versions(
     alt_name: &String,
     second_name: &String,
 ) -> PackageVersions {
-    let alt_version = alt_packages.get(alt_name).unwrap_or(&"Not found".to_string()).clone();
-    let second_version = second_packages.get(second_name).unwrap_or(&"Not found".to_string()).clone();
+    let alt_version = alt_packages
+        .get(alt_name)
+        .unwrap_or(&"Not found".to_string())
+        .clone();
+    let second_version = second_packages
+        .get(second_name)
+        .unwrap_or(&"Not found".to_string())
+        .clone();
 
     PackageVersions {
         alt_version: alt_version.clone(),
@@ -65,20 +71,31 @@ fn should_include_row(
     alt_newer: bool,
     second_newer: bool,
 ) -> bool {
-    match (alt_ver.as_ref().and_then(|v| Version::from(v)), second_ver.as_ref().and_then(|v| Version::from(v))) {
+    match (
+        alt_ver.as_ref().and_then(|v| Version::from(v)),
+        second_ver.as_ref().and_then(|v| Version::from(v)),
+    ) {
         (Some(alt), Some(second)) => {
-            if alt_newer && second_newer { true }
-            else if alt_newer { alt > second }
-            else if second_newer { second > alt }
-            else { true }
+            if alt_newer && second_newer {
+                true
+            } else if alt_newer {
+                alt > second
+            } else if second_newer {
+                second > alt
+            } else {
+                true
+            }
         }
         _ => !alt_newer && !second_newer,
     }
 }
 
 fn format_package_name(alt_name: &str, second_name: &str) -> String {
-    if alt_name == second_name { alt_name.to_string() }
-    else { format!("{} / {}", alt_name, second_name) }
+    if alt_name == second_name {
+        alt_name.to_string()
+    } else {
+        format!("{} / {}", alt_name, second_name)
+    }
 }
 
 fn get_colored_versions(versions: &PackageVersions) -> (String, String) {
@@ -88,15 +105,30 @@ fn get_colored_versions(versions: &PackageVersions) -> (String, String) {
     match (alt_ver, second_ver) {
         (Some(alt), Some(second)) => {
             if alt < second {
-                (versions.alt_version.red().to_string(), versions.second_version.green().to_string())
+                (
+                    versions.alt_version.red().to_string(),
+                    versions.second_version.green().to_string(),
+                )
             } else if alt > second {
-                (versions.alt_version.green().to_string(), versions.second_version.red().to_string())
+                (
+                    versions.alt_version.green().to_string(),
+                    versions.second_version.red().to_string(),
+                )
             } else {
-                (versions.alt_version.white().to_string(), versions.second_version.white().to_string())
+                (
+                    versions.alt_version.white().to_string(),
+                    versions.second_version.white().to_string(),
+                )
             }
         }
-        (None, _) => (versions.alt_version.red().to_string(), versions.second_version.magenta().to_string()),
-        (_, None) => (versions.alt_version.green().to_string(), versions.second_version.red().to_string()),
+        (None, _) => (
+            versions.alt_version.red().to_string(),
+            versions.second_version.magenta().to_string(),
+        ),
+        (_, None) => (
+            versions.alt_version.green().to_string(),
+            versions.second_version.red().to_string(),
+        ),
     }
 }
 
@@ -122,7 +154,12 @@ fn fill_table(
 ) {
     for (alt_name, second_name) in package_mapping {
         let versions = get_package_versions(alt_packages, second_packages, alt_name, second_name);
-        if should_include_row(&versions.alt_ver, &versions.second_ver, alt_newer, second_newer) {
+        if should_include_row(
+            &versions.alt_ver,
+            &versions.second_ver,
+            alt_newer,
+            second_newer,
+        ) {
             let package_display = format_package_name(alt_name, second_name);
 
             table.add_row(Row::new(vec![
@@ -140,17 +177,27 @@ fn get_version_info(
     alt_name: &str,
     second_name: &str,
 ) -> VersionInfo {
-    let alt_version = alt_packages.get(alt_name).unwrap_or(&"Not found".to_string()).clone();
-    let second_version = second_packages.get(second_name).unwrap_or(&"Not found".to_string()).clone();
+    let alt_version = alt_packages
+        .get(alt_name)
+        .unwrap_or(&"Not found".to_string())
+        .clone();
+    let second_version = second_packages
+        .get(second_name)
+        .unwrap_or(&"Not found".to_string())
+        .clone();
 
     let alt_ver = Version::from(&alt_version);
     let second_ver = Version::from(&second_version);
 
     let (alt_style, second_style) = match (alt_ver, second_ver) {
         (Some(alt), Some(second)) => {
-            if alt < second { ("Fr", "Fg") }
-            else if alt > second { ("Fg", "Fr") }
-            else { ("Fw", "Fw") }
+            if alt < second {
+                ("Fr", "Fg")
+            } else if alt > second {
+                ("Fg", "Fr")
+            } else {
+                ("Fw", "Fw")
+            }
         }
         (None, _) => ("Fr", "Fm"),
         (_, None) => ("Fg", "Fr"),
@@ -180,7 +227,8 @@ fn terminal_output(
             let alt_name = package.split(" / ").next().unwrap();
             let second_name = package.split(" / ").last().unwrap();
 
-            let version_info = get_version_info(alt_packages, second_packages, alt_name, second_name);
+            let version_info =
+                get_version_info(alt_packages, second_packages, alt_name, second_name);
             styled_table.add_row(create_data_row(&package, version_info));
         }
     }
@@ -207,7 +255,12 @@ fn file_output(
 
     for (alt_name, second_name) in package_mapping {
         let versions = get_package_versions(alt_packages, second_packages, alt_name, second_name);
-        if should_include_row(&versions.alt_ver, &versions.second_ver, alt_newer, second_newer) {
+        if should_include_row(
+            &versions.alt_ver,
+            &versions.second_ver,
+            alt_newer,
+            second_newer,
+        ) {
             let (alt_colored, second_colored) = get_colored_versions(&versions);
             let package_display = format_package_name(alt_name, second_name);
 
@@ -235,15 +288,35 @@ pub fn display_comparison(
     args: &Args,
 ) -> Result<(), Box<dyn Error>> {
     let mut table = init_row();
-    let header = "\nALT vs Second Repo Package Comparison\n".blue().bold().to_string();
+    let header = "\nALT vs Second Repo Package Comparison\n"
+        .blue()
+        .bold()
+        .to_string();
 
-    fill_table(&mut table, package_mapping, alt_packages, alt_newer, second_newer, second_packages);
+    fill_table(
+        &mut table,
+        package_mapping,
+        alt_packages,
+        alt_newer,
+        second_newer,
+        second_packages,
+    );
 
     if let Some(ref output_file) = args.output_file {
-        file_output(alt_packages, second_packages, package_mapping, alt_newer, second_newer, &header, output_file)?
+        file_output(
+            alt_packages,
+            second_packages,
+            package_mapping,
+            alt_newer,
+            second_newer,
+            &header,
+            output_file,
+        )?
     }
 
-    if !args.silent { terminal_output(&table, alt_packages, second_packages, header); }
+    if !args.silent {
+        terminal_output(&table, alt_packages, second_packages, header);
+    }
 
     Ok(())
 }
@@ -253,7 +326,7 @@ fn create_output_string(
     alt_newer: i32,
     second_newer: i32,
     equal: i32,
-    missing: i32
+    missing: i32,
 ) -> String {
     if detailed {
         format!(
@@ -288,9 +361,13 @@ pub fn display_stats(
                 let second_ver = Version::from(second);
 
                 if let (Some(alt_v), Some(second_v)) = (alt_ver, second_ver) {
-                    if alt_v > second_v { alt_newer += 1; }
-                    else if alt_v < second_v { second_newer += 1; }
-                    else { equal += 1; }
+                    if alt_v > second_v {
+                        alt_newer += 1;
+                    } else if alt_v < second_v {
+                        second_newer += 1;
+                    } else {
+                        equal += 1;
+                    }
                 }
             }
             _ => missing += 1,
@@ -304,7 +381,9 @@ pub fn display_stats(
         file.write_all(output.as_bytes())?;
     }
 
-    if !args.silent { println!("{}", output); }
+    if !args.silent {
+        println!("{}", output);
+    }
 
     Ok(())
 }

@@ -10,6 +10,5 @@ prettytable-rs = "0.10"
 colored = "3.0.0"
 indicatif = "0.17"
 reqwest = { version = "0.12.12", features = ["blocking"] }
-tokio = { version = "1.37", features = ["full"] }
 xz2 = "0.1"
 version-compare = "0.2"

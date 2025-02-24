@@ -14,15 +14,25 @@ pub struct Args {
     pub(crate) output_file: Option<PathBuf>,
 
     /// URL for the ALT Linux package list (default: Sisyphus bin.list.xz)
-    #[arg(long = "alt-url", default_value = "https://ftp.altlinux.org/pub/distributions/ALTLinux/Sisyphus/files/list/bin.list.xz")]
+    #[arg(
+        long = "alt-url",
+        default_value = "https://ftp.altlinux.org/pub/distributions/ALTLinux/Sisyphus/files/list/bin.list.xz"
+    )]
     pub alt_url: String,
 
     /// URL for the second repository package list (e.g., Proxmox)
-    #[arg(long = "second-url", default_value = "http://download.proxmox.com/debian/pve/dists/bookworm/pve-no-subscription/binary-amd64/Packages")]
+    #[arg(
+        long = "second-url",
+        default_value = "http://download.proxmox.com/debian/pve/dists/bookworm/pve-no-subscription/binary-amd64/Packages"
+    )]
     pub second_url: String,
 
     /// Path to the package mapping file
-    #[arg(short = 'm', long = "mapping-file", default_value = "package_mapping.txt")]
+    #[arg(
+        short = 'm',
+        long = "mapping-file",
+        default_value = "package_mapping.txt"
+    )]
     pub mapping_file: PathBuf,
 
     /// Silent mode (suppress console output except errors)
@@ -59,8 +69,8 @@ pub enum Commands {
 }
 
 impl Args {
-    /// Check file only output
-    pub fn is_file_output_only(&self) -> bool {
-        self.output_file.is_some() && self.silent
-    }
+    // /// Check file only output
+    // pub fn is_file_output_only(&self) -> bool {
+    //     self.output_file.is_some() && self.silent
+    // }
 }
