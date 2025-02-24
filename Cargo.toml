@@ -12,3 +12,7 @@ indicatif = "0.17"
 reqwest = { version = "0.12.12", features = ["blocking"] }
 xz2 = "0.1"
 version-compare = "0.2"
+tempfile = "3.17.1"
+
+[dev-dependencies]
+tempfile = "3.17.1"

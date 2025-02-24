@@ -39,3 +39,88 @@ fn clean_version_string(version: &str) -> String {
         base_version.to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_parse_valid_data() {
+        let input = "Package: test-package\n\
+                     Version: 1.2.3-4\n\
+                     Package: another-package\n\
+                     Version: 2.3.4+git123\n";
+
+        let result = ProxmoxParser::parse(input).unwrap();
+        let mut expected = HashMap::new();
+        expected.insert("test-package".to_string(), "1.2.3".to_string());
+        expected.insert("another-package".to_string(), "2.3.4".to_string());
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_parse_empty_data() {
+        let input = "";
+        let result = ProxmoxParser::parse(input).unwrap();
+        let expected: HashMap<String, String> = HashMap::new();
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_parse_missing_version() {
+        let input = "Package: test-package\n\
+                     Package: another-package\n";
+
+        let result = ProxmoxParser::parse(input).unwrap();
+        let expected: HashMap<String, String> = HashMap::new();
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_parse_invalid_regex() {
+        let input = "Not a package format\nInvalid line\n";
+        let result = ProxmoxParser::parse(input).unwrap();
+        let expected: HashMap<String, String> = HashMap::new();
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_clean_version_simple() {
+        let version = "1.2.3";
+        let result = clean_version_string(version);
+        assert_eq!(result, "1.2.3");
+    }
+
+    #[test]
+    fn test_clean_version_with_dash() {
+        let version = "1.2.3-4";
+        let result = clean_version_string(version);
+        assert_eq!(result, "1.2.3");
+    }
+
+    #[test]
+    fn test_clean_version_with_plus() {
+        let version = "1.2.3+git123";
+        let result = clean_version_string(version);
+        assert_eq!(result, "1.2.3");
+    }
+
+    #[test]
+    fn test_clean_version_with_both() {
+        let version = "1.2.3-4+git123";
+        let result = clean_version_string(version);
+        assert_eq!(result, "1.2.3");
+    }
+
+    #[test]
+    fn test_clean_version_empty() {
+        let version = "";
+        let result = clean_version_string(version);
+        assert_eq!(result, "");
+    }
+}

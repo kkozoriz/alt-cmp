@@ -81,3 +81,75 @@ pub fn save_to_file(data: &str, path: &PathBuf) -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::{self, File};
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_read_package_mapping_valid_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("mapping.txt");
+        fs::write(&file_path, "pkg1 pkg2\npkg3 pkg4\ninvalid\n").unwrap();
+
+        let result = read_package_mapping(&file_path).unwrap();
+        let mut expected = HashMap::new();
+
+        expected.insert("pkg1".to_string(), "pkg2".to_string());
+        expected.insert("pkg3".to_string(), "pkg4".to_string());
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_read_package_mapping_empty_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("empty.txt");
+        File::create(&file_path).unwrap();
+
+        let result = read_package_mapping(&file_path).unwrap();
+        let expected: PackageMapping = HashMap::new();
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_read_package_mapping_nonexistent_file() {
+        let file_path = PathBuf::from("nonexistent.txt");
+        let result = read_package_mapping(&file_path);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_save_to_file_success() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("output.txt");
+        let data = "test content";
+
+        save_to_file(data, &file_path).unwrap();
+        let mut file = File::open(&file_path).unwrap();
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).unwrap();
+
+        assert_eq!(contents, "test content");
+    }
+
+    #[test]
+    fn test_save_to_file_invalid_path() {
+        let file_path = PathBuf::from("/invalid/path/output.txt");
+        let result = save_to_file("test", &file_path);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_fetch_progress_initialization() {
+        let progress = FetchProgress::new("test");
+        assert_eq!(progress.pb.message(), "test");
+
+        progress.finish("test");
+    }
+}
