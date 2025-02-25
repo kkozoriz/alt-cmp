@@ -11,75 +11,129 @@ use xz2::read::XzDecoder;
 
 pub type PackageMapping = HashMap<String, String>;
 
-struct FetchProgress {
-    pb: ProgressBar,
+/// Progress indicator for package fetching operations
+struct ProgressIndicator {
+    progress_bar: ProgressBar,
 }
 
-impl FetchProgress {
+impl ProgressIndicator {
+    /// Creates a new spinner-style progress indicator with the given label
     fn new(label: &str) -> Self {
-        let pb = ProgressBar::new_spinner();
-        pb.enable_steady_tick(Duration::from_millis(100));
-        pb.set_style(
-            ProgressStyle::default_spinner()
-                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
-                .template("{spinner:.cyan} Fetching {msg} packages [{elapsed_precise}]")
-                .expect("Failed to set progress style"),
-        );
-        pb.set_message(label.to_string());
-        Self { pb }
+        let progress_bar = ProgressBar::new_spinner();
+        progress_bar.enable_steady_tick(Duration::from_millis(100));
+
+        let spinner_style = ProgressStyle::default_spinner()
+            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+            .template("{spinner:.cyan} Fetching {msg} packages [{elapsed_precise}]")
+            .expect("Failed to set progress style");
+
+        progress_bar.set_style(spinner_style);
+        progress_bar.set_message(label.to_string());
+
+        Self { progress_bar }
     }
 
-    fn finish(&self, label: &str) {
-        self.pb
+    /// Marks the progress as complete with a success message
+    fn complete(&self, label: &str) {
+        self.progress_bar
             .finish_with_message(format!("{} packages fetched", label.green()));
     }
 }
 
+/// NetworkClient handles remote resource fetching with progress indication
+struct NetworkClient {
+    client: Client,
+}
+
+impl NetworkClient {
+    /// Creates a new network client
+    fn new(client: &Client) -> Self {
+        Self {
+            client: client.clone(),
+        }
+    }
+
+    /// Fetches data from a URL, showing progress and handling decompression if needed
+    fn fetch_data(&self, url: &str, label: &str) -> Result<String, Box<dyn Error>> {
+        let progress = ProgressIndicator::new(label);
+        let response = self.client.get(url).send()?;
+        let bytes = response.bytes()?;
+
+        let result = if url.ends_with(".xz") {
+            self.decompress_xz_data(&bytes)?
+        } else {
+            String::from_utf8(bytes.to_vec())?
+        };
+
+        progress.complete(label);
+        Ok(result)
+    }
+
+    /// Decompresses XZ compressed data
+    fn decompress_xz_data(&self, compressed_data: &[u8]) -> Result<String, Box<dyn Error>> {
+        let mut decompressed = String::new();
+        XzDecoder::new(compressed_data).read_to_string(&mut decompressed)?;
+        Ok(decompressed)
+    }
+}
+
+/// FileManager handles file operations for package mappings and data storage
+struct FileManager;
+
+impl FileManager {
+    /// Reads a package mapping file and returns a HashMap of package mappings
+    fn read_mapping(file_path: &PathBuf) -> Result<PackageMapping, Box<dyn Error>> {
+        let file = File::open(file_path)?;
+        let reader = BufReader::new(file);
+
+        let mapping = reader
+            .lines()
+            .map_while(Result::ok)
+            .filter_map(|line| Self::parse_mapping_line(&line))
+            .collect();
+
+        Ok(mapping)
+    }
+
+    /// Parses a single line from a mapping file
+    fn parse_mapping_line(line: &str) -> Option<(String, String)> {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+
+        if parts.len() >= 2 {
+            Some((parts[0].to_string(), parts[1].to_string()))
+        } else {
+            None
+        }
+    }
+
+    /// Saves string data to a file
+    fn save_data(data: &str, path: &PathBuf) -> Result<(), Box<dyn Error>> {
+        let mut file = File::create(path)?;
+        file.write_all(data.as_bytes())?;
+        Ok(())
+    }
+}
+
+// Public API
+
+/// Fetches a package list from a remote URL with progress indication
 pub fn fetch_package_list(
     client: &Client,
     url: &str,
     label: &str,
 ) -> Result<String, Box<dyn Error>> {
-    let progress = FetchProgress::new(label);
-    let response = client.get(url).send()?;
-    let bytes = response.bytes()?;
-    let mut decompressed = String::new();
-
-    if url.ends_with(".xz") {
-        XzDecoder::new(bytes.as_ref()).read_to_string(&mut decompressed)?;
-    } else {
-        decompressed = String::from_utf8(bytes.to_vec())?;
-    }
-
-    progress.finish(label);
-    Ok(decompressed)
+    let network_client = NetworkClient::new(client);
+    network_client.fetch_data(url, label)
 }
 
+/// Reads a package mapping file and returns a HashMap of package mappings
 pub fn read_package_mapping(file_path: &PathBuf) -> Result<PackageMapping, Box<dyn Error>> {
-    let file = File::open(file_path)?;
-    let reader = BufReader::new(file);
-
-    let mapping = reader
-        .lines()
-        .map_while(Result::ok)
-        .filter_map(|line| {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-
-            if parts.len() >= 2 {
-                Some((parts[0].to_string(), parts[1].to_string()))
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    Ok(mapping)
+    FileManager::read_mapping(file_path)
 }
 
+/// Saves string data to a file
 pub fn save_to_file(data: &str, path: &PathBuf) -> Result<(), Box<dyn Error>> {
-    File::create(path)?.write_all(data.as_bytes())?;
-
-    Ok(())
+    FileManager::save_data(data, path)
 }
 
 #[cfg(test)]
@@ -146,10 +200,31 @@ mod tests {
     }
 
     #[test]
-    fn test_fetch_progress_initialization() {
-        let progress = FetchProgress::new("test");
-        assert_eq!(progress.pb.message(), "test");
+    fn test_progress_indicator_initialization() {
+        let progress = ProgressIndicator::new("test");
+        assert_eq!(progress.progress_bar.message(), "test");
 
-        progress.finish("test");
+        progress.complete("test");
+    }
+
+    #[test]
+    fn test_file_manager_parse_mapping_line() {
+        // Valid line with two parts
+        assert_eq!(
+            FileManager::parse_mapping_line("pkg1 pkg2"),
+            Some(("pkg1".to_string(), "pkg2".to_string()))
+        );
+
+        // Valid line with more than two parts (uses first two)
+        assert_eq!(
+            FileManager::parse_mapping_line("pkg1 pkg2 extra"),
+            Some(("pkg1".to_string(), "pkg2".to_string()))
+        );
+
+        // Invalid line with only one part
+        assert_eq!(FileManager::parse_mapping_line("invalid"), None);
+
+        // Empty line
+        assert_eq!(FileManager::parse_mapping_line(""), None);
     }
 }

@@ -5,88 +5,259 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;
 use std::io::Write;
-use std::path::PathBuf;
 use version_compare::Version;
 
-// TODO!: need refactor
-
 #[derive(Clone)]
-struct PackageVersions {
+struct PackageInfo {
+    name: String,
     alt_version: String,
     second_version: String,
-    alt_ver: Option<String>,
-    second_ver: Option<String>,
 }
 
-#[derive(Clone)]
-struct VersionInfo {
-    alt_version: String,
-    second_version: String,
-    alt_style: &'static str,
-    second_style: &'static str,
+struct PackageComparator {
+    alt_packages: HashMap<String, String>,
+    second_packages: HashMap<String, String>,
+    package_mapping: HashMap<String, String>,
 }
 
-fn create_header_row(row: &Row) -> Row {
-    Row::new(vec![
-        Cell::new(&row.get_cell(0).unwrap().get_content()).style_spec("bFc"), // Bold Cyan
-        Cell::new(&row.get_cell(1).unwrap().get_content()).style_spec("bFg"), // Bold Green
-        Cell::new(&row.get_cell(2).unwrap().get_content()).style_spec("bFm"), // Bold Magenta
-    ])
-}
+impl PackageComparator {
+    fn new(
+        alt_packages: HashMap<String, String>,
+        second_packages: HashMap<String, String>,
+        package_mapping: HashMap<String, String>,
+    ) -> Self {
+        Self {
+            alt_packages,
+            second_packages,
+            package_mapping,
+        }
+    }
 
-fn create_data_row(package: &str, version_info: VersionInfo) -> Row {
-    Row::new(vec![
-        Cell::new(package).style_spec("Fy"),
-        Cell::new(&version_info.alt_version).style_spec(version_info.alt_style),
-        Cell::new(&version_info.second_version).style_spec(version_info.second_style),
-    ])
-}
+    fn get_package_info(&self, alt_name: &str, second_name: &str) -> PackageInfo {
+        let alt_version = self
+            .alt_packages
+            .get(alt_name)
+            .cloned()
+            .unwrap_or_else(|| "Not found".to_string());
 
-fn get_package_versions(
-    alt_packages: &HashMap<String, String>,
-    second_packages: &HashMap<String, String>,
-    alt_name: &String,
-    second_name: &String,
-) -> PackageVersions {
-    let alt_version = alt_packages
-        .get(alt_name)
-        .unwrap_or(&"Not found".to_string())
-        .clone();
-    let second_version = second_packages
-        .get(second_name)
-        .unwrap_or(&"Not found".to_string())
-        .clone();
+        let second_version = self
+            .second_packages
+            .get(second_name)
+            .cloned()
+            .unwrap_or_else(|| "Not found".to_string());
 
-    PackageVersions {
-        alt_version: alt_version.clone(),
-        second_version: second_version.clone(),
-        alt_ver: Some(alt_version.clone()),
-        second_ver: Some(second_version.clone()),
+        PackageInfo {
+            name: format_package_name(alt_name, second_name),
+            alt_version,
+            second_version,
+        }
+    }
+
+    fn compare_versions(&self, package: &PackageInfo) -> VersionComparisonResult {
+        let alt_ver = Version::from(&package.alt_version);
+        let second_ver = Version::from(&package.second_version);
+
+        match (alt_ver, second_ver) {
+            (Some(alt), Some(second)) => {
+                if alt < second {
+                    VersionComparisonResult::SecondNewer
+                } else if alt > second {
+                    VersionComparisonResult::AltNewer
+                } else {
+                    VersionComparisonResult::Equal
+                }
+            }
+            (None, Some(_)) => VersionComparisonResult::AltMissing,
+            (Some(_), None) => VersionComparisonResult::SecondMissing,
+            (None, None) => VersionComparisonResult::BothMissing,
+        }
+    }
+
+    fn should_include_package(
+        &self,
+        comparison: &VersionComparisonResult,
+        alt_newer: bool,
+        second_newer: bool,
+    ) -> bool {
+        if !alt_newer && !second_newer {
+            return true;
+        }
+
+        match comparison {
+            VersionComparisonResult::AltNewer => alt_newer,
+            VersionComparisonResult::SecondNewer => second_newer,
+            VersionComparisonResult::Equal => alt_newer && second_newer,
+            _ => !alt_newer && !second_newer,
+        }
+    }
+
+    fn get_all_packages(
+        &self,
+        alt_newer: bool,
+        second_newer: bool,
+    ) -> Vec<(PackageInfo, VersionComparisonResult)> {
+        let mut result = Vec::new();
+
+        for (alt_name, second_name) in &self.package_mapping {
+            let package = self.get_package_info(alt_name, second_name);
+            let comparison = self.compare_versions(&package);
+
+            if self.should_include_package(&comparison, alt_newer, second_newer) {
+                result.push((package, comparison));
+            }
+        }
+
+        result
+    }
+
+    fn calculate_stats(&self) -> PackageStats {
+        let mut stats = PackageStats::default();
+
+        for (alt_name, second_name) in &self.package_mapping {
+            let package = self.get_package_info(alt_name, second_name);
+            let comparison = self.compare_versions(&package);
+
+            match comparison {
+                VersionComparisonResult::AltNewer => stats.alt_newer += 1,
+                VersionComparisonResult::SecondNewer => stats.second_newer += 1,
+                VersionComparisonResult::Equal => stats.equal += 1,
+                _ => stats.missing += 1,
+            }
+        }
+
+        stats
     }
 }
 
-fn should_include_row(
-    alt_ver: &Option<String>,
-    second_ver: &Option<String>,
-    alt_newer: bool,
-    second_newer: bool,
-) -> bool {
-    match (
-        alt_ver.as_ref().and_then(|v| Version::from(v)),
-        second_ver.as_ref().and_then(|v| Version::from(v)),
-    ) {
-        (Some(alt), Some(second)) => {
-            if alt_newer && second_newer {
-                true
-            } else if alt_newer {
-                alt > second
-            } else if second_newer {
-                second > alt
-            } else {
-                true
-            }
+enum VersionComparisonResult {
+    AltNewer,
+    SecondNewer,
+    Equal,
+    AltMissing,
+    SecondMissing,
+    BothMissing,
+}
+
+#[derive(Default)]
+struct PackageStats {
+    alt_newer: i32,
+    second_newer: i32,
+    equal: i32,
+    missing: i32,
+}
+
+struct TableFormatter;
+
+impl TableFormatter {
+    fn create_header_row() -> Row {
+        Row::new(vec![
+            Cell::new("Package (ALT/Second)").style_spec("bFc"),
+            Cell::new("ALT Version").style_spec("bFg"),
+            Cell::new("Second Version").style_spec("bFm"),
+        ])
+    }
+
+    fn create_data_row(package: &PackageInfo, comparison: &VersionComparisonResult) -> Row {
+        let (alt_style, second_style) = match comparison {
+            VersionComparisonResult::AltNewer => ("Fg", "Fr"),
+            VersionComparisonResult::SecondNewer => ("Fr", "Fg"),
+            VersionComparisonResult::Equal => ("Fw", "Fw"),
+            VersionComparisonResult::AltMissing => ("Fr", "Fm"),
+            VersionComparisonResult::SecondMissing => ("Fg", "Fr"),
+            VersionComparisonResult::BothMissing => ("Fr", "Fr"),
+        };
+
+        Row::new(vec![
+            Cell::new(&package.name).style_spec("Fy"),
+            Cell::new(&package.alt_version).style_spec(alt_style),
+            Cell::new(&package.second_version).style_spec(second_style),
+        ])
+    }
+
+    fn get_colored_versions(
+        package: &PackageInfo,
+        comparison: &VersionComparisonResult,
+    ) -> (String, String) {
+        match comparison {
+            VersionComparisonResult::SecondNewer => (
+                package.alt_version.red().to_string(),
+                package.second_version.green().to_string(),
+            ),
+            VersionComparisonResult::AltNewer => (
+                package.alt_version.green().to_string(),
+                package.second_version.red().to_string(),
+            ),
+            VersionComparisonResult::Equal => (
+                package.alt_version.white().to_string(),
+                package.second_version.white().to_string(),
+            ),
+            VersionComparisonResult::AltMissing => (
+                package.alt_version.red().to_string(),
+                package.second_version.magenta().to_string(),
+            ),
+            VersionComparisonResult::SecondMissing | VersionComparisonResult::BothMissing => (
+                package.alt_version.green().to_string(),
+                package.second_version.red().to_string(),
+            ),
         }
-        _ => !alt_newer && !second_newer,
+    }
+
+    fn create_table(packages_with_comparison: &[(PackageInfo, VersionComparisonResult)]) -> Table {
+        let mut table = Table::new();
+        table.add_row(Self::create_header_row());
+
+        for (package, comparison) in packages_with_comparison {
+            table.add_row(Self::create_data_row(package, comparison));
+        }
+
+        table
+    }
+
+    fn create_formatted_table_for_terminal(
+        packages_with_comparison: &[(PackageInfo, VersionComparisonResult)],
+    ) -> Table {
+        Self::create_table(packages_with_comparison)
+    }
+
+    fn create_formatted_table_for_file(
+        packages_with_comparison: &[(PackageInfo, VersionComparisonResult)],
+    ) -> String {
+        let mut table = Table::new();
+        table.add_row(Row::new(vec![
+            Cell::new(&"Package (ALT/Second)".cyan().bold().to_string()),
+            Cell::new(&"ALT Version".green().bold().to_string()),
+            Cell::new(&"Second Version".magenta().bold().to_string()),
+        ]));
+
+        for (package, comparison) in packages_with_comparison {
+            let (alt_colored, second_colored) = Self::get_colored_versions(package, comparison);
+
+            table.add_row(Row::new(vec![
+                Cell::new(&package.name.yellow().to_string()),
+                Cell::new(&alt_colored),
+                Cell::new(&second_colored),
+            ]));
+        }
+
+        format!("{}", table)
+    }
+}
+
+struct StatsFormatter;
+
+impl StatsFormatter {
+    fn format_stats(stats: &PackageStats, detailed: bool) -> String {
+        if detailed {
+            format!(
+                "Package Statistics:\n- ALT newer: {}\n- Second newer: {}\n- Equal: {}\n- Missing: {}",
+                stats.alt_newer, stats.second_newer, stats.equal, stats.missing
+            )
+        } else {
+            format!(
+                "ALT newer: {}, Second newer: {}, Equal: {}, Missing: {}",
+                stats.alt_newer, stats.second_newer, stats.equal, stats.missing
+            )
+        }
     }
 }
 
@@ -98,187 +269,6 @@ fn format_package_name(alt_name: &str, second_name: &str) -> String {
     }
 }
 
-fn get_colored_versions(versions: &PackageVersions) -> (String, String) {
-    let alt_ver = versions.alt_ver.as_ref().and_then(|v| Version::from(v));
-    let second_ver = versions.second_ver.as_ref().and_then(|v| Version::from(v));
-
-    match (alt_ver, second_ver) {
-        (Some(alt), Some(second)) => {
-            if alt < second {
-                (
-                    versions.alt_version.red().to_string(),
-                    versions.second_version.green().to_string(),
-                )
-            } else if alt > second {
-                (
-                    versions.alt_version.green().to_string(),
-                    versions.second_version.red().to_string(),
-                )
-            } else {
-                (
-                    versions.alt_version.white().to_string(),
-                    versions.second_version.white().to_string(),
-                )
-            }
-        }
-        (None, _) => (
-            versions.alt_version.red().to_string(),
-            versions.second_version.magenta().to_string(),
-        ),
-        (_, None) => (
-            versions.alt_version.green().to_string(),
-            versions.second_version.red().to_string(),
-        ),
-    }
-}
-
-fn init_row() -> Table {
-    let mut table = Table::new();
-
-    table.add_row(Row::new(vec![
-        Cell::new("Package (ALT/Second)"),
-        Cell::new("ALT Version"),
-        Cell::new("Second Version"),
-    ]));
-
-    table
-}
-
-fn fill_table(
-    table: &mut Table,
-    package_mapping: &HashMap<String, String>,
-    alt_packages: &HashMap<String, String>,
-    alt_newer: bool,
-    second_newer: bool,
-    second_packages: &HashMap<String, String>,
-) {
-    for (alt_name, second_name) in package_mapping {
-        let versions = get_package_versions(alt_packages, second_packages, alt_name, second_name);
-        if should_include_row(
-            &versions.alt_ver,
-            &versions.second_ver,
-            alt_newer,
-            second_newer,
-        ) {
-            let package_display = format_package_name(alt_name, second_name);
-
-            table.add_row(Row::new(vec![
-                Cell::new(&package_display),
-                Cell::new(&versions.alt_version),
-                Cell::new(&versions.second_version),
-            ]));
-        }
-    }
-}
-
-fn get_version_info(
-    alt_packages: &HashMap<String, String>,
-    second_packages: &HashMap<String, String>,
-    alt_name: &str,
-    second_name: &str,
-) -> VersionInfo {
-    let alt_version = alt_packages
-        .get(alt_name)
-        .unwrap_or(&"Not found".to_string())
-        .clone();
-    let second_version = second_packages
-        .get(second_name)
-        .unwrap_or(&"Not found".to_string())
-        .clone();
-
-    let alt_ver = Version::from(&alt_version);
-    let second_ver = Version::from(&second_version);
-
-    let (alt_style, second_style) = match (alt_ver, second_ver) {
-        (Some(alt), Some(second)) => {
-            if alt < second {
-                ("Fr", "Fg")
-            } else if alt > second {
-                ("Fg", "Fr")
-            } else {
-                ("Fw", "Fw")
-            }
-        }
-        (None, _) => ("Fr", "Fm"),
-        (_, None) => ("Fg", "Fr"),
-    };
-
-    VersionInfo {
-        alt_version,
-        second_version,
-        alt_style,
-        second_style,
-    }
-}
-
-fn terminal_output(
-    table: &Table,
-    alt_packages: &HashMap<String, String>,
-    second_packages: &HashMap<String, String>,
-    header: String,
-) {
-    let mut styled_table = Table::new();
-
-    for (i, row) in table.row_iter().enumerate() {
-        if i == 0 {
-            styled_table.add_row(create_header_row(row));
-        } else {
-            let package = row.get_cell(0).unwrap().get_content();
-            let alt_name = package.split(" / ").next().unwrap();
-            let second_name = package.split(" / ").last().unwrap();
-
-            let version_info =
-                get_version_info(alt_packages, second_packages, alt_name, second_name);
-            styled_table.add_row(create_data_row(&package, version_info));
-        }
-    }
-
-    print!("{}", header);
-    styled_table.printstd();
-}
-
-fn file_output(
-    alt_packages: &HashMap<String, String>,
-    second_packages: &HashMap<String, String>,
-    package_mapping: &HashMap<String, String>,
-    alt_newer: bool,
-    second_newer: bool,
-    header: &String,
-    output_file: &PathBuf,
-) -> Result<(), Box<dyn Error>> {
-    let mut file_output = Table::new();
-    file_output.add_row(Row::new(vec![
-        Cell::new(&"Package (ALT/Second)".cyan().bold().to_string()),
-        Cell::new(&"ALT Version".green().bold().to_string()),
-        Cell::new(&"Second Version".magenta().bold().to_string()),
-    ]));
-
-    for (alt_name, second_name) in package_mapping {
-        let versions = get_package_versions(alt_packages, second_packages, alt_name, second_name);
-        if should_include_row(
-            &versions.alt_ver,
-            &versions.second_ver,
-            alt_newer,
-            second_newer,
-        ) {
-            let (alt_colored, second_colored) = get_colored_versions(&versions);
-            let package_display = format_package_name(alt_name, second_name);
-
-            file_output.add_row(Row::new(vec![
-                Cell::new(&package_display.yellow().to_string()),
-                Cell::new(&alt_colored),
-                Cell::new(&second_colored),
-            ]));
-        }
-    }
-
-    let output = format!("{}{}", header, file_output);
-    let mut file = File::create(output_file)?;
-
-    file.write_all(output.as_bytes())?;
-
-    Ok(())
-}
 pub fn display_comparison(
     alt_packages: &HashMap<String, String>,
     second_packages: &HashMap<String, String>,
@@ -287,58 +277,35 @@ pub fn display_comparison(
     second_newer: bool,
     args: &Args,
 ) -> Result<(), Box<dyn Error>> {
-    let mut table = init_row();
+    let comparator = PackageComparator::new(
+        alt_packages.clone(),
+        second_packages.clone(),
+        package_mapping.clone(),
+    );
+
+    let packages_with_comparison = comparator.get_all_packages(alt_newer, second_newer);
     let header = "\nALT vs Second Repo Package Comparison\n"
         .blue()
         .bold()
         .to_string();
 
-    fill_table(
-        &mut table,
-        package_mapping,
-        alt_packages,
-        alt_newer,
-        second_newer,
-        second_packages,
-    );
-
+    // File output
     if let Some(ref output_file) = args.output_file {
-        file_output(
-            alt_packages,
-            second_packages,
-            package_mapping,
-            alt_newer,
-            second_newer,
-            &header,
-            output_file,
-        )?
+        let table_content =
+            TableFormatter::create_formatted_table_for_file(&packages_with_comparison);
+        let output = format!("{}{}", header, table_content);
+
+        let mut file = File::create(output_file)?;
+        file.write_all(output.as_bytes())?;
     }
 
     if !args.silent {
-        terminal_output(&table, alt_packages, second_packages, header);
+        let table = TableFormatter::create_formatted_table_for_terminal(&packages_with_comparison);
+        println!("{}", header);
+        table.printstd();
     }
 
     Ok(())
-}
-
-fn create_output_string(
-    detailed: bool,
-    alt_newer: i32,
-    second_newer: i32,
-    equal: i32,
-    missing: i32,
-) -> String {
-    if detailed {
-        format!(
-            "Package Statistics:\n- ALT newer: {}\n- Second newer: {}\n- Equal: {}\n- Missing: {}",
-            alt_newer, second_newer, equal, missing
-        )
-    } else {
-        format!(
-            "ALT newer: {}, Second newer: {}, Equal: {}, Missing: {}",
-            alt_newer, second_newer, equal, missing
-        )
-    }
 }
 
 pub fn display_stats(
@@ -348,33 +315,14 @@ pub fn display_stats(
     detailed: bool,
     args: &Args,
 ) -> Result<(), Box<dyn Error>> {
-    let (mut alt_newer, mut second_newer) = (0, 0);
-    let (mut equal, mut missing) = (0, 0);
+    let comparator = PackageComparator::new(
+        alt_packages.clone(),
+        second_packages.clone(),
+        package_mapping.clone(),
+    );
 
-    for (alt_name, second_name) in package_mapping {
-        let alt_version = alt_packages.get(alt_name);
-        let second_version = second_packages.get(second_name);
-
-        match (alt_version, second_version) {
-            (Some(alt), Some(second)) => {
-                let alt_ver = Version::from(alt);
-                let second_ver = Version::from(second);
-
-                if let (Some(alt_v), Some(second_v)) = (alt_ver, second_ver) {
-                    if alt_v > second_v {
-                        alt_newer += 1;
-                    } else if alt_v < second_v {
-                        second_newer += 1;
-                    } else {
-                        equal += 1;
-                    }
-                }
-            }
-            _ => missing += 1,
-        }
-    }
-
-    let output = create_output_string(detailed, alt_newer, second_newer, equal, missing);
+    let stats = comparator.calculate_stats();
+    let output = StatsFormatter::format_stats(&stats, detailed);
 
     if let Some(ref output_file) = args.output_file {
         let mut file = File::create(output_file)?;
